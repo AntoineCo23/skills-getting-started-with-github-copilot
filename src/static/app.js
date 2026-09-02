@@ -4,14 +4,25 @@ document.addEventListener("DOMContentLoaded", () => {
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
 
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>'"]/g, (character) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "'": "&#39;",
+      '"': "&quot;",
+    }[character]));
+  }
+
   // Function to fetch activities from API
   async function fetchActivities() {
     try {
-      const response = await fetch("/activities");
+      const response = await fetch("/activities", { cache: "no-store" });
       const activities = await response.json();
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      activitySelect.innerHTML = '<option value="">-- Select an activity --</option>';
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -19,12 +30,36 @@ document.addEventListener("DOMContentLoaded", () => {
         activityCard.className = "activity-card";
 
         const spotsLeft = details.max_participants - details.participants.length;
+        const participants = details.participants.length
+          ? `<ul class="participants-list">${details.participants
+              .map(
+                (participant) => `
+                  <li>
+                    <span>${escapeHtml(participant)}</span>
+                    <button class="remove-participant" type="button"
+                      data-activity="${escapeHtml(name)}"
+                      data-email="${escapeHtml(participant)}"
+                      aria-label="Remove ${escapeHtml(participant)}"
+                      title="Remove participant">&times;</button>
+                  </li>`
+              )
+              .join("")}</ul>`
+          : '<p class="no-participants">No students registered yet.</p>';
 
         activityCard.innerHTML = `
           <h4>${name}</h4>
           <p>${details.description}</p>
           <p><strong>Schedule:</strong> ${details.schedule}</p>
           <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
+          <div class="participants">
+            <h5>
+              <span>Registered students <b>${details.participants.length}</b></span>
+              <button class="add-participant" type="button"
+                data-activity="${escapeHtml(name)}"
+                aria-label="Add participant" title="Add participant">&plus;</button>
+            </h5>
+            ${participants}
+          </div>
         `;
 
         activitiesList.appendChild(activityCard);
@@ -40,6 +75,34 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("Error fetching activities:", error);
     }
   }
+
+  activitiesList.addEventListener("click", async (event) => {
+    const removeButton = event.target.closest(".remove-participant");
+    const addButton = event.target.closest(".add-participant");
+
+    if (addButton) {
+      activitySelect.value = addButton.dataset.activity;
+      document.getElementById("email").focus();
+      signupForm.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
+    if (!removeButton) return;
+
+    const activity = removeButton.dataset.activity;
+    const email = removeButton.dataset.email;
+    const response = await fetch(
+      `/activities/${encodeURIComponent(activity)}/signup?email=${encodeURIComponent(email)}`,
+      { method: "DELETE" }
+    );
+    const result = await response.json();
+
+    messageDiv.textContent = result.message || result.detail || "An error occurred";
+    messageDiv.className = response.ok ? "success" : "error";
+    messageDiv.classList.remove("hidden");
+
+    if (response.ok) await fetchActivities();
+  });
 
   // Handle form submission
   signupForm.addEventListener("submit", async (event) => {
@@ -62,6 +125,7 @@ document.addEventListener("DOMContentLoaded", () => {
         messageDiv.textContent = result.message;
         messageDiv.className = "success";
         signupForm.reset();
+        await fetchActivities();
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
